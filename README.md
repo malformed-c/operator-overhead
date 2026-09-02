@@ -397,7 +397,7 @@ Nothing fires when that is violated. The only remedy is numbers reproducible by 
 
 1. **The losing columns get the same prominence as the winning ones.** Arm B loses reaction outright and loses memory to a consolidated manager by 37×, and both sit in the results table rather than in a footnote.
 2. **Every run writes a raw record to `results/raw/`, including runs that FAILED their controls** — a failed control is the most useful artifact here, because it names the population that was actually standing.
-3. **The protocol was written down before the numbers, and it is [ADR-0098][adr98]'s rather than this benchmark's.**
+3. **The protocol was written down before the numbers, and it is ADR-0098's rather than this benchmark's.**
 
 If an arm wins on memory and CPU and those three cannot be produced, the result should not be believed.
 
@@ -412,4 +412,3 @@ If an arm wins on memory and CPU and those three cannot be produced, the result 
 - `CachedObjects` is **derived, not measured**: controller-runtime exports no cache-size metric, and each manager's informer is label-scoped to its own pair. The field carries its own basis string so nobody promotes it.
 
 [sdk]: https://github.com/apsis-io/sdk
-[adr98]: ../apsis-io/periapsis/adr/0098-operator-tax-measurement-is-local-evidence-not-controller-runtime-proof.md
