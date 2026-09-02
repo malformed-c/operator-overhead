@@ -11,4 +11,5 @@ validation/
 *.wat
 
 # Fetched by dwarf via `wkg wit fetch` on every build. Not authored.
-wit/deps/
+# Leading ** because a pattern containing a slash is anchored to this file.
+**/wit/deps/

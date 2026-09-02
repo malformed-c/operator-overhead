@@ -115,6 +115,8 @@ TypeScript        (arm B)        1             48
 
 **3× the code, for identical behaviour.** The difference is not cleverness — it is a manager, a scheme, a cache with a label selector, a predicate, flag parsing, a leader-election block and a shared-mode branch. Arm B's author writes none of it **because Radiant already ran it**. That is ADR-0075's claim, stated as a diff.
 
+**Written against the raw WIT, not the [Periapsis SDK][sdk].** The SDK is how a Perseid is normally authored — it exports `LANGUAGE_VERSION`, wraps the resume vocabulary, and documents the trade this step makes by hand (`untilDrift`). These components import `radiant:reconcile` directly, which is why the 48 lines are the whole program and why `spec.language` here is a claim rather than a derived stamp. An SDK-authored relay would be shorter to write and would carry the SDK's own code behind it.
+
 **Neither arm is charged for its platform**, which is the only way the two numbers are comparable. Arm A's 157 lines do not include controller-runtime, most of that 31 MiB binary. Arm B's 48 do not include `perseid/relay/wit/`, which is `radiant:reconcile` **vendored by dwarf** rather than written — a toolchain artifact, the same as arm A's `go.sum`. Counting either platform against the program that uses it would be the same error, made twice.
 
 ---
@@ -160,7 +162,11 @@ Every run takes these **before** the first window opens, and refuses to proceed 
 
 ### 1. Writes: Perseid is 14.6× lower, and consolidation does not touch it
 
-**192 writes against 2810** at N=64, for the same 2816 source changes. It comes from *coalescing* — the program wakes, relays the latest value, and parks, so it works per **convergence** rather than per **change** (6 convergences per 45 changes). An idle parked Perseid does **zero writes and one pass** per 45 s, measured per-program from `radiant_perseid_applied_total{perseid=…}`.
+**192 writes against 2810** at N=64, for the same 2816 source changes. It does **not** come from waking on change: under 1 Hz churn the program never parks. Every pass finds `src` already ahead of `dst`, relays the latest value and yields, and a yielded program's next pass is the next poll tick — `-perseid-poll`, **15 s by default** (`reconcilehost.waitYield`: *paced by Poll, not immediate; a yield carries no wake condition*). Measured at every rung, `applied == runs == 3N` per 45 s window: one pass per program per 15 s, each relaying whatever the source holds at that instant. An idle parked Perseid does **zero writes and one pass** per 45 s, measured per-program from `radiant_perseid_applied_total{perseid=…}`.
+
+***THE RATIO IS THE POLL INTERVAL OVER THE CHANGE PERIOD, AND IT IS A KNOB.*** 15 s ÷ 1 s ≈ 44 ticks ÷ 3 passes ≈ 14.6. It is a batching interval, not an architecture: `-perseid-poll=1s` would collapse it to ~1×, and a source that changes less often than once per 15 s gets one write per change, the same as arm A. A wake index that fired on every ConfigMap change (ADR-0097's gap 2, once closed) would do the same *unless* the program keeps yielding after a write rather than parking — which is what this step does, and why the win exists at all.
+
+**What the destination sees, which no column above measures.** 2624 of 2816 source changes at N=64 never reached `dst`; between passes `dst` is up to 15 s behind `src`. The reaction column cannot see this — it dates only the values that *were* relayed, from their own origin, so it reports ~300 ms for a destination that is stale most of the time. For a level-triggered relay, where the only consumer is whoever reads `dst` next, that is the intended behaviour, and it is how every Kubernetes controller reconciles: to the latest state, not through every intermediate one. For a workload that needs every version to land, this is the wrong arm, and the writes column would be reporting a loss as a win.
 
 Arm A3 consolidates 64 managers into one process and still issues 2810 writes, because every change still becomes a PATCH. **This is the column consolidation cannot fix, and it is the one to lead with.**
 
@@ -192,7 +198,7 @@ Yielded  pass yielded; declared 3 obligation(s)
 
 ## What would change these numbers
 
-- **The writes column is the durable finding.** It comes from coalescing rather than from process count, and arm A3 shows that consolidating operators does not reproduce it.
+- **The writes column survives consolidation and not much else.** Arm A3 shows that merging operators does not reproduce it; `-perseid-poll` and the change rate set it, and either can erase it — see *1. Writes*.
 - **The memory column is the contingent one.** It is a comparison of process counts, so it moves with any change to how either side is deployed.
 
 ### The shared host is part of arm B, and leaving it out flatters the arm
@@ -235,10 +241,10 @@ Both are scraped, because they answer different questions:
 | 45 s window | **mine** (`perseid="overhead/relay-*"`) | shared bucket (every Perseid) |
 |---|---|---|
 | idle | `applied=0  runs=1` | `applied=3  runs=4` |
-| change | `applied=6  runs=3` | `applied=11 runs=8` |
+| change | `applied=3  runs=3` | `applied=6  runs=6` |
 
 **An idle parked Perseid performs zero writes and one pass in 45 seconds**, and that is a measurement of *this program* rather than a delta against a background that was most of the bucket.
-Under change it performed **6 writes for 45 source changes**, against 44 for arm A2 and 66 for arm A1 — 7× and 11× fewer.
+Under change it performed **3 writes for 44 source changes**, against 44 for arm A2 and 67 for arm A1 — 15× and 22× fewer, and every one of the 3 was a poll-tick pass rather than a wake (see *1. Writes*).
 
 The bucket stays in the report as the neighbour control: a window where the bucket moved and the per-program series did not is a window with somebody else's program in it.
 
@@ -250,7 +256,7 @@ The bucket stays in the report as the neighbour control: a window where the buck
 Parked   (Get(".../src-000", "data.v") != Get(".../dst-000", "data.v")) || Now() >= 1788285851835
 ```
 
-**It coalesces**, at roughly 1 write per 7 changes at 1 Hz — see the table above.
+**It batches**, at one write per poll tick however often the source moves — 1 write per ~15 changes at 1 Hz, set by `-perseid-poll`. See *1. Writes* for what that costs the destination.
 
 ### Its identity is derived, not authored — and that is a real asymmetry
 
@@ -279,6 +285,8 @@ The derivation is bounded by the apiserver, not by good intentions: Radiant is d
 ### What it loses
 
 **Reaction: 37 ms p50 against 9.9 ms**, and convergence 47 ms against 16 ms. Waking a parked program through a shared wake index costs more than an informer callback in the same process. That is architecture, not tuning, and it is the clearest loss in the table.
+
+**Freshness, under churn.** A source that moves faster than the poll tick leaves `dst` up to 15 s behind it, and the reaction column does not see that, because it only dates the values that were relayed. The two losses are one design seen twice: waking a parked program costs more than a callback, and a yielded program does not wake at all until the tick.
 
 ### A step's memory is tight, and it is set by the component
 
@@ -400,6 +408,8 @@ If an arm wins on memory and CPU and those three cannot be produced, the result 
 - It does not measure a mature cluster's third-party operator population.
 - The client-side counters see what an arm's **own** client did. Traffic an arm causes *indirectly* — a write that wakes another controller — is a different question and is not answered here.
 - Arm B's API figure is Radiant's counter as a **delta against an N=0 baseline**. Radiant is a shared host serving other programs, so that is the arm's *marginal* cost and not an isolated total. The record says so in the row.
+- Neither the destination's **staleness** nor the **fraction of source changes that reached it** is a column. Under 1 Hz churn arm B relays about 1 change in 15 and the reaction quantiles cover only those; arm A relays every one. A rung with a change period longer than `-perseid-poll` would make the writes columns equal, and it was not run.
 - `CachedObjects` is **derived, not measured**: controller-runtime exports no cache-size metric, and each manager's informer is label-scoped to its own pair. The field carries its own basis string so nobody promotes it.
 
+[sdk]: https://github.com/apsis-io/sdk
 [adr98]: ../apsis-io/periapsis/adr/0098-operator-tax-measurement-is-local-evidence-not-controller-runtime-proof.md
