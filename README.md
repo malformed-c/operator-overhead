@@ -107,17 +107,17 @@ Arm A stamps in the **same PATCH** as the value, so it stays at one apiserver re
 Language                     files           code
 -------------------------------------------------
 Go                (arm A)        1            157
-TypeScript        (arm B)        1             48
+TypeScript        (arm B)        1             43
 -------------------------------------------------
 ```
 
 `code` is cloc's, which counts neither comments nor blank lines. `bench size` carries its own classifier and agrees with cloc to the line, which is why the number in a record and the number in this table can be quoted interchangeably.
 
-**3× the code, for identical behaviour.** The difference is not cleverness — it is a manager, a scheme, a cache with a label selector, a predicate, flag parsing, a leader-election block and a shared-mode branch. Arm B's author writes none of it **because Radiant already ran it**. That is ADR-0075's claim, stated as a diff.
+**3.7× the code, for identical behaviour.** The difference is not cleverness — it is a manager, a scheme, a cache with a label selector, a predicate, flag parsing, a leader-election block and a shared-mode branch. Arm B's author writes none of it **because Radiant already ran it**. That is ADR-0075's claim, stated as a diff.
 
-**Written against the raw WIT, not the [Periapsis SDK][sdk].** The SDK is how a Perseid is normally authored — it exports `LANGUAGE_VERSION`, wraps the resume vocabulary, and documents the trade this step makes by hand (`untilDrift`). These components import `radiant:reconcile` directly, which is why the 48 lines are the whole program and why `spec.language` here is a claim rather than a derived stamp. An SDK-authored relay would be shorter to write and would carry the SDK's own code behind it.
+**Written against the raw WIT, not the [Periapsis SDK][sdk].** The SDK is how a Perseid is normally authored — it exports `LANGUAGE_VERSION`, wraps the resume vocabulary, and documents the trade this step makes by hand (`untilDrift`). These components import `radiant:reconcile` directly, which is why the 43 lines are the whole program and why `spec.language` here is a claim rather than a derived stamp. An SDK-authored relay would be shorter to write and would carry the SDK's own code behind it.
 
-**Neither arm is charged for its platform**, which is the only way the two numbers are comparable. Arm A's 157 lines do not include controller-runtime, most of that 31 MiB binary. Arm B's 48 do not include `perseid/relay/wit/`, which is `radiant:reconcile` **vendored by dwarf** rather than written — a toolchain artifact, the same as arm A's `go.sum`. Counting either platform against the program that uses it would be the same error, made twice.
+**Neither arm is charged for its platform**, which is the only way the two numbers are comparable. Arm A's 157 lines do not include controller-runtime, most of that 31 MiB binary. Arm B's 43 do not include `perseid/relay/wit/`, which is `radiant:reconcile` **vendored by dwarf** rather than written — a toolchain artifact, the same as arm A's `go.sum`. Counting either platform against the program that uses it would be the same error, made twice.
 
 ---
 

@@ -79,26 +79,18 @@ const fieldPath = (field: string) => 'data.' + field
 const yieldStep = JSON.stringify({ o: 'yield' })
 const terminate = JSON.stringify({ o: 'terminate' })
 
-// fieldOf reads `data.<field>` out of the JSON `observe.get` returns.
+// fieldRef is an observe path narrowed to one field: `<path>#data.<field>`.
 //
-// ***THE HOST HANDS BACK THE WHOLE OBJECT, SO THE FIELD IS PICKED HERE.*** One
-// generic read replaced eight per-kind ones, and a generic read cannot know
-// which field a step wants.
+// ***THE BLOB NEVER ENTERS WASM.*** The host splits on `#`, runs the same parse,
+// confinement and routing the bare path always did, and projects the field on the
+// way out — so only the value crosses the boundary. `#` is unambiguous by
+// construction: a DNS-1123 name cannot contain one, which a last-dot split cannot
+// say (`configmaps/kube-root-ca.crt` is a real object on this cluster).
 //
-// TOTAL: an unreadable shape is `null`, never a throw. A throw escapes into the
-// step and fails the pass; `null` leaves the program yielding, which is the same
-// conservative outcome as an unknown observation and the only one that recovers
-// without an operator.
-function fieldOf(raw: string, field: string): string | null {
-  try {
-    const o = JSON.parse(raw) as { data?: Record<string, unknown> }
-    const v = o?.data?.[field]
-
-    return typeof v === 'string' ? v : null
-  } catch {
-    return null
-  }
-}
+// It matters here beyond tidiness: this arm measures what a wasm step costs, and
+// parsing a whole ConfigMap in QuickJS to read one key was the benchmark's own
+// overhead rather than the workload's.
+const fieldRef = (path: string, field: string) => path + '#' + fieldPath(field)
 
 export const step = {
   run(): string {
@@ -115,21 +107,36 @@ export const step = {
     // visibly running and doing nothing, which is the recoverable failure.
     if (!src || !dst || !field) return yieldStep
 
-    const s = get(src) as Obs
-    // The source is gone. There is nothing left to reconcile toward, ever —
-    // and `Terminated` is genuinely terminal, enforced in radiant's runner.
-    if (s.tag === 'absent') return terminate
+    const s = get(fieldRef(src, field)) as Obs
     if (s.tag === 'unknown') return yieldStep
 
-    const want = fieldOf(s.val, field)
-    // The source exists and carries no value yet. Not an error and not a reason
-    // to park: the harness creates the pair empty and writes into it, so this is
-    // the ordinary pre-first-write state.
-    if (want === null) return yieldStep
+    // ***`absent` ON A NARROWED READ IS TWO DIFFERENT FACTS AND ONLY ONE OF THEM
+    // IS TERMINAL.*** The host passes `absent` through unchanged — a missing
+    // FIELD of an object it read, and an object that is not there, arrive as the
+    // same answer. Terminating on both would kill every instance at startup,
+    // because the harness creates each pair empty and writes into it afterwards:
+    // the ordinary pre-first-write state is a source that exists with no `data.v`.
+    //
+    // So the object is re-read ONLY here, to tell the two apart. The common path
+    // stays one narrowed read; this costs a second one in the rare case, which is
+    // the right way round.
+    if (s.tag === 'absent') {
+      const obj = get(src) as Obs
+      // The source is gone. Nothing left to reconcile toward, ever — and
+      // `Terminated` is genuinely terminal, enforced in radiant's runner.
+      if (obj.tag === 'absent') return terminate
 
-    const d = get(dst) as Obs
+      return yieldStep
+    }
+
+    const want = s.val
+
+    const d = get(fieldRef(dst, field)) as Obs
     if (d.tag === 'unknown') return yieldStep
-    const have = d.tag === 'known' ? fieldOf(d.val, field) : null
+    // `absent` needs no disambiguation on this side: a destination that does not
+    // exist and one that carries no value are both "not converged yet", and the
+    // ensure below is what creates or fills it.
+    const have = d.tag === 'known' ? d.val : null
 
     if (have !== want) {
       // ***DECLARING, NOT DOING.*** `ensure` emits an obligation; radiant
