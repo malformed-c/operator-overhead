@@ -48,6 +48,56 @@ interface observe {
   use types.{obs};
 
   /// Read one object by path. Never throws: failure is `unknown`.
+  ///
+  /// THE PATH MAY CARRY `#field` TO NARROW THE READ HOST-SIDE:
+  /// `configmaps/my-cm#data.version` returns that one value instead of the whole
+  /// object. `#` and not `.` because object NAMES contain dots -
+  /// `configmaps/kube-root-ca.crt` is live, and a dot split would read it as name
+  /// `kube-root-ca`, field `crt`, silently. The signature stays one function and
+  /// one parameter (engi's call); the field rides in the path.
+  ///
+  /// TWO COSTS, BOTH REAL, BOTH ARGUING FOR THE WHOLE-OBJECT READ IN SOME CASES:
+  ///
+  /// ⛔ IT COLLAPSES `absent`-OBJECT WITH `absent`-FIELD. A missing field and a
+  /// missing object both arrive as `absent`, and nothing distinguishes them. A
+  /// program that must tell "no such object" from "no such key" MUST read the
+  /// whole object and pick the field itself - there it sees the object was
+  /// `known` and only the key was missing. Reported by overhead-bench, whose
+  /// guest-side parse is strictly better than `#field` on this axis.
+  ///
+  /// ⛔⛔ SO: ***ANYONE WHO TERMINATES ON `absent` HAS A BUG THE MOMENT THEY
+  /// ADOPT `#field`, AND IT IS A PROPERTY OF THE FORM RATHER THAN OF THEIR
+  /// PROGRAM.*** "The object exists and this key is not written YET" is the
+  /// ORDINARY pre-first-write state - an object created empty and filled in
+  /// afterwards is the common lifecycle, not an edge case - and under `#field`
+  /// it is indistinguishable from "the object is gone". A step that reads the
+  /// second meaning and tears down will tear down at STARTUP, every time,
+  /// before it has ever done any work.
+  ///
+  /// Measured, 2026-09-03: overhead-bench's arm-B relay would have terminated
+  /// every instance on its first pass, and `terminate` is enforced as TERMINAL.
+  /// It was caught by READING this contract rather than by running it - a
+  /// benchmark that dies before its first window looks like a harness fault, so
+  /// running it would have pointed at the wrong thing.
+  ///
+  /// THE SHAPE THAT KEEPS BOTH: narrow on the common path, and buy the
+  /// distinction only when you must -
+  ///
+  ///     s = get(src#data.v)
+  ///     unknown -> yield
+  ///     absent  -> get(src)        // object-existence answers it directly,
+  ///                absent -> gone  // with no JSON parse in the guest
+  ///                else   -> not written yet, yield
+  ///
+  /// One narrowed read on every ordinary pass; a whole-object read only on the
+  /// rare `absent`.
+  ///
+  /// ⚠ IT NARROWS BYTES, NOT THE GRANT. The `#field` is split off BEFORE the
+  /// `spec.reads` check, so the grant is over the bare path and a step granted an
+  /// object may still read every field of it by asking again without the suffix.
+  /// No escalation - the whole object was already readable - but a grant listing
+  /// `configmaps/x#data.v` MATCHES NOTHING, because the check sees
+  /// `configmaps/x`. GRANTS NAME BARE PATHS.
   get: func(path: string) -> obs;
 
   /// Count members of a collection. Never throws: failure is `unknown`.
@@ -911,7 +961,7 @@ world provider {
 /// composition failure here can name either and the demonstration no longer
 /// pins WHICH. Left as-is because nothing composes it today — the only
 /// reference in the tree is a comment in
-/// `examples/wasm/perseid-component/build.sh` — so changing it would be
+/// `examples/wasm/perseid-component/justfile` — so changing it would be
 /// adjusting a demonstration nobody runs on the strength of a guess about what
 /// it should demonstrate.
 ///
@@ -930,26 +980,6 @@ world driver {
   import step;
 }
 
-/// The relay's world: EXACTLY what the code imports, and nothing else.
-///
-/// ***BUILDING AGAINST `world perseid` MAKES THE ARTIFACT DEMAND CAPABILITIES THE
-/// CODE NEVER CALLS*** — measured: observe-cluster, observe-secrets, workloads,
-/// status, delete and create, none of which this program calls. Admission is
-/// demand MINUS grant, so the grant would have to cover reading every Secret in
-/// the namespace and creating and deleting objects, for a program that copies one
-/// string between two ConfigMaps.
-///
-/// `observe-configmaps` is NOT imported and its absence is correct: it is a
-/// capability, not a call — the interface is deliberately empty, a ConfigMap is
-/// read through `observe.get` by path, and the host gates that per kind. It is
-/// named in spec.capabilities instead, so this program's GRANT is a strict
-/// superset of its DEMAND. Admission refuses demand the grant does not cover,
-/// never the reverse.
-///
-/// `wasi:cli/environment` is declared because the step reads spec.config through
-/// `process.env`, and dwarf's shim binds against what the WORLD declares — not
-/// against whatever the JS runtime happens to drag into the import section. The
-/// artifact carried 0.2.12 before this line existed and the step still trapped.
 world relay {
   import observe;
   import ensure;
