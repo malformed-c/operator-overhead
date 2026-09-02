@@ -1,0 +1,14 @@
+/build/
+/results/raw/
+/crrelay
+/bench
+node_modules/
+dist/
+validation/
+
+# Build outputs. Never commit a component or module binary.
+*.wasm
+*.wat
+
+# Fetched by dwarf via `wkg wit fetch` on every build. Not authored.
+wit/deps/

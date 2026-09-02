@@ -1,0 +1,80 @@
+# The fixed half of the benchmark's cluster state: a namespace, an identity for
+# arm A, and the smallest RBAC that lets a relay do its job.
+#
+# Everything that varies with N — the ConfigMap pairs and the arm pods — is
+# created by `bench` so the population is a function of one flag rather than of
+# which YAML somebody remembered to apply.
+#
+#   kubectl apply -f deploy/overhead.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: overhead
+  labels:
+    overhead.apsis/benchmark: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: relay
+  namespace: overhead
+---
+# ***NAMESPACED, AND THE RESOURCE NAMES ARE NOT RESTRICTED FURTHER.***
+# A relay could be bound to exactly `src-<id>` and `dst-<id>` by resourceName,
+# which would be tighter — and would also mean sixty-four Roles, sixty-four
+# bindings, and an RBAC population that grows with N inside the very apiserver
+# whose load is being measured. One Role for the arm keeps the cluster state
+# that varies with N down to the objects the benchmark is actually about.
+#
+# ───────────────────────────────────────────────────────────────────────────
+# ***COMPARE THIS TO PERSEID, WHICH DERIVES RBAC AND SA RATHER THAN ASKING FOR
+# THEM.*** Everything below is hand-authored: an identity, a grant, a binding,
+# and a human keeping all three in agreement with what the program actually
+# does. Radiant provisions a ServiceAccount, Role and RoleBinding per program,
+# with the rules computed from that program's declared `spec.writes` — scoped by
+# `resourceNames` to exactly the objects it named, owned by the Perseid so the
+# grant cannot outlive it. Nobody writes it and nobody can forget to narrow it.
+#
+# ***AND THE ASYMMETRY IS THIS FILE'S, NOT THE COMPARISON'S.*** The looser grant
+# above is not carelessness — it is what per-name scoping costs when a human has
+# to maintain it at N=64. Arm B gets the tight version because no hand is
+# involved, which is the same claim the memory columns make, in a place the
+# memory columns cannot see. The counterweight, stated where the cost is: three
+# objects per program is 3N pieces of cluster state that arm A never creates.
+# ───────────────────────────────────────────────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: relay
+  namespace: overhead
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    # `watch` is the whole point of arm A and is listed first for that reason:
+    # this arm's cost is a watch and a cache per instance.
+    verbs: ["get", "list", "watch", "patch"]
+  # Leader election, for arm A1 only. Arm A2 runs with the identical Role and
+  # simply never takes a Lease — SAME IDENTITY, SAME PERMISSIONS, ONE FLAG
+  # DIFFERENT, which is what makes A1 and A2 a paired comparison rather than two
+  # unrelated deployments.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: relay
+  namespace: overhead
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: relay
+subjects:
+  - kind: ServiceAccount
+    name: relay
+    namespace: overhead

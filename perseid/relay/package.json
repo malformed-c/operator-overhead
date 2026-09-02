@@ -1,0 +1,11 @@
+{
+  "name": "operator-overhead-perseid-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Arm B of the operator-overhead benchmark: the CM relay as a Perseid step component.",
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1"
+  }
+}
