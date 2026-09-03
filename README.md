@@ -288,7 +288,13 @@ The derivation is bounded by the apiserver, not by good intentions: Radiant is d
 
 ### What it loses
 
-**Reaction: 37 ms p50 against 9.9 ms**, and convergence 47 ms against 16 ms. Waking a parked program through a shared wake index costs more than an informer callback in the same process. That is architecture, not tuning, and it is the clearest loss in the table.
+**Reaction: 37 ms p50 against 9.9 ms**, and convergence 47 ms against 16 ms.
+
+⚠ ***THIS COLUMN DOES NOT MEASURE WHAT THIS FILE SAID IT MEASURED, AND THE NUMBER IS WITHDRAWN.*** It read: *waking a parked program through a shared wake index costs more than an informer callback in the same process*. Measured afterwards on the host that produced the ladder: **ConfigMap wakes never fired at all.** In one radiant process, over eleven hours, programs parked on ConfigMaps woke **0 times** while programs parked on Deployments woke **1005 times** — `relay-000` parked ten times and woke never. Arm B was paced by the poll re-evaluating its parked resume, which is the same clock as the yield path, so 37 ms is a sample of poll-paced convergence and not of a wake.
+
+The fault is located and is not in this benchmark: the informer's **store** was fresh the whole time — the backstop pass read and relayed current values — while its **handler** notifications were silent, so the break is between the informer and its handler rather than anywhere upstream. On a rolled radiant a ConfigMap wake fires in the same second, which does not distinguish a fix from a restart clearing the fault.
+
+**Arm B's reaction figure needs re-measuring against a host with a `Woke` event to point at, and the row above is kept only so the withdrawal has something to refer to.** The lesson is cheap to state and was expensive to find: the mechanism this column named is wired everywhere except the one kind it depended on, so every structural check passed and only a number that did not fit gave it away.
 
 **Freshness, under churn.** A source that moves faster than the poll tick leaves `dst` up to 15 s behind it, and the reaction column does not see that, because it only dates the values that were relayed. The two losses are one design seen twice: waking a parked program costs more than a callback, and a yielded program does not wake at all until the tick.
 
