@@ -6,6 +6,10 @@ cd "$(dirname "$0")/.."
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY
 BENCH=${BENCH:-/tmp/bench}
 export PATH=/usr/local/bin:$PATH SUDO_ASKPASS=${SUDO_ASKPASS:-/tmp/askpass.sh}
+
+# Built here, every run — see hack/ladder.sh for why a cached /tmp binary is a
+# silent-stale hazard rather than a convenience.
+go build -o "$BENCH" ./cmd/bench
 export BENCH_APISERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'|sed 's|https://||')"
 
 run_cell() {  # arm n up_timeout converge_timeout
