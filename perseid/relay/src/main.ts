@@ -92,6 +92,29 @@ const terminate = JSON.stringify({ o: 'terminate' })
 // overhead rather than the workload's.
 const fieldRef = (path: string, field: string) => path + '#' + fieldPath(field)
 
+// fieldOf picks `data.<field>` out of a whole object.
+//
+// ***IT IS THE COMPATIBILITY PATH, NOT A LEFTOVER.*** A host that predates
+// `#field` does not split the suffix: it reads the whole string as an object
+// NAME, finds nothing, and answers `absent` — indistinguishable from the field
+// being unset. So the fallback below re-reads the object and looks itself, which
+// is what makes this step correct on both hosts. On a current host it runs only
+// when the field really is missing.
+//
+// TOTAL: an unreadable shape is `null`, never a throw. A throw escapes into the
+// step and fails the pass; `null` leaves the program yielding, which is the same
+// conservative outcome as an unknown observation.
+function fieldOf(raw: string, field: string): string | null {
+  try {
+    const o = JSON.parse(raw) as { data?: Record<string, unknown> }
+    const v = o?.data?.[field]
+
+    return typeof v === 'string' ? v : null
+  } catch {
+    return null
+  }
+}
+
 export const step = {
   run(): string {
     const env = process.env
@@ -120,23 +143,34 @@ export const step = {
     // So the object is re-read ONLY here, to tell the two apart. The common path
     // stays one narrowed read; this costs a second one in the rare case, which is
     // the right way round.
+    let want: string | null = s.tag === 'known' ? s.val : null
+
     if (s.tag === 'absent') {
       const obj = get(src) as Obs
       // The source is gone. Nothing left to reconcile toward, ever — and
       // `Terminated` is genuinely terminal, enforced in radiant's runner.
       if (obj.tag === 'absent') return terminate
+      if (obj.tag === 'unknown') return yieldStep
 
-      return yieldStep
+      // The object is there. Either the field is genuinely unset — the ordinary
+      // pre-first-write state — or this host does not split `#` and answered
+      // about an object name that does not exist. One look tells both apart.
+      want = fieldOf(obj.val, field)
+      if (want === null) return yieldStep
     }
-
-    const want = s.val
+    if (want === null) return yieldStep
 
     const d = get(fieldRef(dst, field)) as Obs
     if (d.tag === 'unknown') return yieldStep
-    // `absent` needs no disambiguation on this side: a destination that does not
-    // exist and one that carries no value are both "not converged yet", and the
-    // ensure below is what creates or fills it.
-    const have = d.tag === 'known' ? d.val : null
+    // `absent` here needs no terminate decision — a destination that does not
+    // exist and one with no value are both "not converged yet". It still needs
+    // the same fallback, or on a pre-`#` host every destination reads as empty
+    // and the step rewrites a value that is already there, every pass.
+    let have: string | null = d.tag === 'known' ? d.val : null
+    if (d.tag === 'absent') {
+      const obj = get(dst) as Obs
+      have = obj.tag === 'known' ? fieldOf(obj.val, field) : null
+    }
 
     if (have !== want) {
       // ***DECLARING, NOT DOING.*** `ensure` emits an obligation; radiant
