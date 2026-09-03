@@ -298,7 +298,9 @@ The fault is located and is not in this benchmark: the informer's **store** was 
 
 **And this time the mechanism is asserted rather than assumed.** Radiant now publishes `radiant_reconcile_wake_deliveries_total{kind}`, so the run carries its own positive control: `configmaps` went **60 → 110 across the window**, proving the wake feed was delivering while the reaction was sampled. The original figure had no such control, which is exactly why it could measure the poll for eleven hours and look reasonable.
 
-Three samples is a small denominator and it is printed beside the number for that reason: 45 source changes at 1 Hz produced 3 convergences, because the *write* side still coalesces. The reaction quantiles describe the values that were relayed, not the changes that were not.
+Three samples is a small denominator and it is printed beside the number for that reason: 45 source changes at 1 Hz produced 3 convergences.
+
+**Two mechanisms coalesce there, not one, and this file said one until radiant's author pointed at the second.** The write side coalesces because the step relays current state. But the **wake index coalesces too, by construction**: its wake channel is buffered to one and the send is non-blocking, so a change arriving while the program is running — or while an earlier wake is still unconsumed — is *dropped deliberately*, because a pending wake already covers it. A wake is a hint, not a queue. **The split between the two is unmeasured**, and naming only the write side would put a cost on the wrong component.
 
 The lesson is cheap to state and was expensive to find: the mechanism this column named is wired everywhere except the one kind it depended on, so every structural check passed and only a number that did not fit gave it away.
 
