@@ -294,7 +294,13 @@ The derivation is bounded by the apiserver, not by good intentions: Radiant is d
 
 The fault is located and is not in this benchmark: the informer's **store** was fresh the whole time — the backstop pass read and relayed current values — while its **handler** notifications were silent, so the break is between the informer and its handler rather than anywhere upstream. On a rolled radiant a ConfigMap wake fires in the same second, which does not distinguish a fix from a restart clearing the fault.
 
-**Arm B's reaction figure needs re-measuring against a host with a `Woke` event to point at, and the row above is kept only so the withdrawal has something to refer to.** The lesson is cheap to state and was expensive to find: the mechanism this column named is wired everywhere except the one kind it depended on, so every structural check passed and only a number that did not fit gave it away.
+**⇒ RE-MEASURED ON A HOST WHERE THE WAKE FIRES: 15.7 ms p50** (p99 30.4, min 7.3, **3 samples**), against arm A2's 9.9 ms. The withdrawn 37 ms was poll-paced convergence; this is the reflex the column was always meant to report, and arm B is slower than an in-process informer callback by ~6 ms rather than by ~27.
+
+**And this time the mechanism is asserted rather than assumed.** Radiant now publishes `radiant_reconcile_wake_deliveries_total{kind}`, so the run carries its own positive control: `configmaps` went **60 → 110 across the window**, proving the wake feed was delivering while the reaction was sampled. The original figure had no such control, which is exactly why it could measure the poll for eleven hours and look reasonable.
+
+Three samples is a small denominator and it is printed beside the number for that reason: 45 source changes at 1 Hz produced 3 convergences, because the *write* side still coalesces. The reaction quantiles describe the values that were relayed, not the changes that were not.
+
+The lesson is cheap to state and was expensive to find: the mechanism this column named is wired everywhere except the one kind it depended on, so every structural check passed and only a number that did not fit gave it away.
 
 **Freshness, under churn.** A source that moves faster than the poll tick leaves `dst` up to 15 s behind it, and the reaction column does not see that, because it only dates the values that were relayed. The two losses are one design seen twice: waking a parked program costs more than a callback, and a yielded program does not wake at all until the tick.
 
