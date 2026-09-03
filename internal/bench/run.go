@@ -391,12 +391,12 @@ func preflight(ctx context.Context, cs *kubernetes.Clientset, dyn dynamic.Interf
 	// marginal figure — impossible to take. Narrowed to N>0 rather than softened,
 	// so a real run still cannot skip it.
 	if (spec.Arm == relay.ArmPerseid || spec.Arm == relay.ArmFused) && spec.N > 0 {
-		placement, err := PodPlacement(ctx, cs, spec.Host)
+		placement, err := PodPlacement(ctx, cs, spec.Host, spec.Arm)
 		pre.Placement = placement
 		if err != nil {
 			return pre, err
 		}
-		if err := ConfigReachesGuest(ctx, cs); err != nil {
+		if err := ConfigReachesGuest(ctx, cs, spec.Arm); err != nil {
 			return pre, err
 		}
 		pre.ConfigDelivered = true

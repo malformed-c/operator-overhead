@@ -139,7 +139,7 @@ func cmdUp(ctx context.Context, args []string) error {
 		} else if err := bench.UpPerseids(wctx, dyn, c.n); err != nil {
 			return err
 		}
-		if err := bench.WaitPerseidsRunning(wctx, dyn, c.n); err != nil {
+		if err := bench.WaitPerseidsRunning(wctx, dyn, c.arm, c.n); err != nil {
 			return err
 		}
 	} else {

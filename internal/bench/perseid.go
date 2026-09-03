@@ -25,6 +25,20 @@ const PerseidPrefix = "relay-"
 // built from the two together.
 const PerseidPodPrefix = "perseid-"
 
+// PodPrefixFor is the pod-name prefix radiant gives an arm's programs.
+//
+// ***THE FUSED ARM'S POD IS NOT NAMED perseid-relay-ANYTHING.*** It is ONE
+// program called `fused`, so every check keyed on the relay prefix looked at an
+// empty population — and one of them then refused the run for a reason that was
+// true of the check rather than of the arm.
+func PodPrefixFor(arm string) string {
+	if arm == relay.ArmFused {
+		return PerseidPodPrefix + FusedName
+	}
+
+	return PerseidPodPrefix + PerseidPrefix
+}
+
 // PerseidGVR is the Perseid custom resource.
 var PerseidGVR = schema.GroupVersionResource{
 	Group:    "radiant.apsis",
@@ -90,7 +104,8 @@ const EnvForward = "all"
 
 // ConfigReachesGuest reports whether every Perseid pod was built by a runtime
 // that passes spec.config through, and names what to do when one was not.
-func ConfigReachesGuest(ctx context.Context, cs *kubernetes.Clientset) error {
+func ConfigReachesGuest(ctx context.Context, cs *kubernetes.Clientset, arm string) error {
+	prefix := PodPrefixFor(arm)
 	pods, err := cs.CoreV1().Pods(relay.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("bench: list perseid pods: %w", err)
@@ -98,7 +113,7 @@ func ConfigReachesGuest(ctx context.Context, cs *kubernetes.Clientset) error {
 	var stale []string
 	seen := 0
 	for _, p := range pods.Items {
-		if !strings.HasPrefix(p.Name, PerseidPodPrefix+PerseidPrefix) {
+		if !strings.HasPrefix(p.Name, prefix) {
 			continue
 		}
 		seen++
@@ -109,7 +124,7 @@ func ConfigReachesGuest(ctx context.Context, cs *kubernetes.Clientset) error {
 	}
 	if seen == 0 {
 		return fmt.Errorf("bench: no %s* pods exist, so whether spec.config reaches the "+
-			"guest could not be checked at all", PerseidPodPrefix+PerseidPrefix)
+			"guest could not be checked at all", prefix)
 	}
 	if len(stale) > 0 {
 		return fmt.Errorf("bench: %d/%d perseid pods do not carry %s=%q: %s. An absent "+
@@ -195,7 +210,8 @@ func PerseidsHealthy(ctx context.Context, dyn dynamic.Interface, when string) er
 // this guard refuses an off-host pod needs a pod on a second physical host, and
 // arranging one on the real cluster means placing an instance where the sampler
 // cannot see it — the exact condition the guard exists to prevent.
-func PodPlacement(ctx context.Context, cs kubernetes.Interface, host string) (map[string]string, error) {
+func PodPlacement(ctx context.Context, cs kubernetes.Interface, host, arm string) (map[string]string, error) {
+	prefix := PodPrefixFor(arm)
 	pods, err := cs.CoreV1().Pods(relay.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("bench: list perseid pods: %w", err)
@@ -212,7 +228,7 @@ func PodPlacement(ctx context.Context, cs kubernetes.Interface, host string) (ma
 	placement := map[string]string{}
 	var offHost []string
 	for _, p := range pods.Items {
-		if !strings.HasPrefix(p.Name, PerseidPodPrefix+PerseidPrefix) || p.Spec.NodeName == "" {
+		if !strings.HasPrefix(p.Name, prefix) || p.Spec.NodeName == "" {
 			continue
 		}
 		placement[p.Name] = p.Spec.NodeName
@@ -494,14 +510,20 @@ func DownPerseids(ctx context.Context, dyn dynamic.Interface) error {
 // both are terminal until someone changes something — a benchmark that waited
 // would hang for its whole timeout and then say "not ready".
 // ═══════════════════════════════════════════════════════════════════════════
-func WaitPerseidsRunning(ctx context.Context, dyn dynamic.Interface, n int) error {
+// ***THE ARM IS A PARAMETER BECAUSE THE FUSED ARM IS ONE OBJECT, NOT N.*** This
+// selected `b-perseid` unconditionally and compared against n, so for
+// `b2-perseid-fused` it listed nothing and waited for eight — a guaranteed
+// timeout against a program that was already Parked and correct. The population
+// a control counts must come from the same place the arm's population does.
+func WaitPerseidsRunning(ctx context.Context, dyn dynamic.Interface, arm string, n int) error {
+	want := relay.Instances(arm, n)
 	api := dyn.Resource(PerseidGVR).Namespace(relay.Namespace)
 	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
 
 	for {
 		list, err := api.List(ctx, metav1.ListOptions{
-			LabelSelector: relay.LabelArm + "=" + relay.ArmPerseid,
+			LabelSelector: relay.LabelArm + "=" + arm,
 		})
 		if err != nil {
 			return fmt.Errorf("bench: list perseids: %w", err)
@@ -517,7 +539,7 @@ func WaitPerseidsRunning(ctx context.Context, dyn dynamic.Interface, n int) erro
 				bad[obj.GetName()] = phase + ": " + reason
 			}
 		}
-		if live == n {
+		if live == want {
 			return nil
 		}
 		if len(bad) > 0 {
@@ -525,7 +547,7 @@ func WaitPerseidsRunning(ctx context.Context, dyn dynamic.Interface, n int) erro
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("bench: %d/%d perseids running or parked when the wait expired", live, n)
+			return fmt.Errorf("bench: %d/%d %s perseids running or parked when the wait expired", live, want, arm)
 		case <-tick.C:
 		}
 	}

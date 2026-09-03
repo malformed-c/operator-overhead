@@ -45,7 +45,7 @@ func TestPodPlacementRefusesAnOffHostPod(t *testing.T) {
 		pod(PerseidPodPrefix+PerseidPrefix+"001", "engifire"), // the hazard
 	)
 
-	placement, err := PodPlacement(context.Background(), cs, "engix99")
+	placement, err := PodPlacement(context.Background(), cs, "engix99", relay.ArmPerseid)
 	if err == nil {
 		t.Fatal("a pod on engifire was accepted; the sampler cannot see it and the arm " +
 			"would read as CHEAPER rather than as incomplete")
@@ -71,7 +71,7 @@ func TestPodPlacementAcceptsAnOnHostPopulation(t *testing.T) {
 		pod(PerseidPodPrefix+PerseidPrefix+"001", "engix99-e2e-2"),
 	)
 
-	placement, err := PodPlacement(context.Background(), cs, "engix99")
+	placement, err := PodPlacement(context.Background(), cs, "engix99", relay.ArmPerseid)
 	if err != nil {
 		t.Fatalf("two pods on two engix99 PAWNS must pass — the host is what matters, "+
 			"not the node: %v", err)
@@ -91,7 +91,7 @@ func TestPodPlacementIgnoresForeignPods(t *testing.T) {
 		pod("a2-cr-noleader-000", "engifire"),         // not a perseid pod at all
 	)
 
-	if _, err := PodPlacement(context.Background(), cs, "engix99"); err != nil {
+	if _, err := PodPlacement(context.Background(), cs, "engix99", relay.ArmPerseid); err != nil {
 		t.Fatalf("a foreign Perseid off-host must not fail this run: %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestPodPlacementSkipsUnscheduled(t *testing.T) {
 		pod(PerseidPodPrefix+PerseidPrefix+"000", ""),
 	)
 
-	placement, err := PodPlacement(context.Background(), cs, "engix99")
+	placement, err := PodPlacement(context.Background(), cs, "engix99", relay.ArmPerseid)
 	if err != nil {
 		t.Fatalf("an unscheduled pod must not read as off-host: %v", err)
 	}
